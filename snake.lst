@@ -1,0 +1,362 @@
+     1                                  bits 16
+     2                                  org 0x8000
+     3                                  
+     4                                  ; 常量放最前面
+     5                                  ; 移动方向
+     6                                  DIR_UP    equ 0
+     7                                  DIR_RIGHT equ 1
+     8                                  DIR_DOWN  equ 2
+     9                                  DIR_LEFT  equ 3
+    10                                  
+    11                                  SNAKE_MAX_LENGTH equ 2000
+    12                                  
+    13                                  
+    14                                  init:
+    15 00000000 FA                      	cli
+    16 00000001 31C0                    	xor ax, ax
+    17 00000003 8ED8                    	mov ds, ax
+    18 00000005 8ED0                    	mov ss, ax
+    19 00000007 BC0080                  	mov sp, 0x8000
+    20 0000000A FB                      	sti
+    21                                  
+    22                                  ; 进入80x25文本模式，在任意位置画一个O
+    23                                  ; 初始化，进入80x25文本模式
+    24                                  
+    25                                  menu:
+    26                                  .clear_screen:
+    27 0000000B B400                    	mov ah, 0x00
+    28 0000000D B003                    	mov al, 0x03
+    29 0000000F CD10                    	int 0x10
+    30                                  
+    31 00000011 BE[8911]                	mov si, menu_message
+    32 00000014 FC                      	cld
+    33                                  .load_menu:
+    34                                  
+    35 00000015 AC                      	lodsb
+    36                                  	
+    37 00000016 3C00                    	cmp al, 0
+    38 00000018 7408                    	je .wait_key
+    39                                  	
+    40 0000001A B40E                    	mov ah, 0x0e
+    41 0000001C B700                    	mov bh, 0
+    42 0000001E CD10                        int 0x10
+    43                                  
+    44 00000020 EBF3                        jmp .load_menu
+    45                                  .wait_key:
+    46                                  	; 阻塞地等待键盘输入，如果不加对于al的比较那就是任意键
+    47 00000022 B400                    	mov ah, 0
+    48 00000024 CD16                    	int 0x16
+    49                                  
+    50                                  ; 在任意位置画一个O
+    51                                  game_init:
+    52                                  	; 清个屏先
+    53 00000026 B80300                  	mov ax, 0x0003
+    54 00000029 CD10                    	int 0x10
+    55                                  	;初始时间
+    56 0000002B B400                    	mov ah, 0
+    57 0000002D CD1A                    	int 0x1a
+    58 0000002F 8916[DE01]              	mov [last_tick], dx
+    59                                  	; 初始化蛇的位置
+    60 00000033 31F6                    	xor si, si
+    61 00000035 51                      	push cx
+    62 00000036 8A0E[8711]              	mov cl, [init_snake_x]
+    63 0000003A 8A2E[8811]              	mov ch, [init_snake_y]
+    64                                  .init_body:
+    65 0000003E 3B36[E301]              	cmp si, [snake_length]
+    66 00000042 7311                    	jae .print_snake_head
+    67 00000044 88CA                    	mov dl, cl
+    68 00000046 8894[E501]              	mov byte [snake_x + si], dl
+    69 0000004A 88EE                    	mov dh, ch
+    70 0000004C 88B4[B509]              	mov byte [snake_y + si], dh
+    71 00000050 46                      	inc si
+    72 00000051 FEC9                    	dec cl		; 水平排列只要减少x
+    73 00000053 EBE9                    	jmp .init_body
+    74                                  	
+    75                                  	
+    76                                  .print_snake_head:
+    77 00000055 59                      	pop cx
+    78                                  	; 蛇头
+    79                                  	; int10,ah=02为设置光标位置
+    80                                  	; BH = 显示页号,一般使用 0
+    81                                  	; DH = 行号 y,0 ~ 24
+    82                                  	; DL = 列号 x,0 ~ 79
+    83 00000056 B402                    	mov ah, 0x02
+    84 00000058 B700                    	mov bh, 0
+    85                                  
+    86 0000005A 8A36[B509]              	mov dh, [snake_y]
+    87 0000005E 8A16[E501]              	mov dl, [snake_x]
+    88                                  
+    89 00000062 CD10                    	int 0x10
+    90                                  	
+    91                                  	; int10,ah=09为在光标位置输出字符
+    92                                  	; AL = 要输出的字符
+    93                                  	; BH = 显示页,通常 0
+    94                                  	; BL = 字符颜色属性
+    95                                  	; 常用颜色：00h  黑色，01h  蓝色，02h  绿色，04h  红色，07h  灰白色，0Ah  亮绿色，		
+    96                                  	; 0Ch; 亮红色，0Eh  黄色，0Fh  亮白色
+    97                                  	; CX = 输出多少次
+    98 00000064 B409                    	mov ah, 0x09
+    99 00000066 B04F                    	mov al, 'O'
+   100 00000068 B700                    	mov bh, 0
+   101 0000006A B30A                    	mov bl, 0x0A
+   102 0000006C B90100                  	mov cx, 1
+   103 0000006F CD10                    	int 0x10
+   104                                  
+   105 00000071 BE0100                  	mov si, 1
+   106                                  
+   107                                  .print_snake_body:
+   108                                  	;打印蛇身
+   109                                  
+   110 00000074 3B36[E301]              	cmp si, [snake_length]
+   111 00000078 731E                    	jae  game_loop
+   112                                  
+   113 0000007A B402                    	mov ah, 0x02
+   114 0000007C B700                    	mov bh, 0
+   115 0000007E 8AB4[B509]              	mov dh, [snake_y + si]
+   116 00000082 8A94[E501]              	mov dl, [snake_x + si]
+   117                                  
+   118 00000086 CD10                    	int 0x10
+   119                                  
+   120 00000088 B409                    	mov ah, 0x09
+   121 0000008A B02A                    	mov al, '*'
+   122 0000008C B700                    	mov bh, 0
+   123 0000008E B30A                    	mov bl, 0x0A
+   124 00000090 B90100                  	mov cx, 1
+   125 00000093 CD10                    	int 0x10
+   126                                  	
+   127 00000095 46                      	inc si
+   128 00000096 EBDC                    	jmp .print_snake_body
+   129                                  
+   130                                  game_loop:
+   131                                  	
+   132 00000098 E81900                  	call check_keyboard
+   133                                  	; 获取bios tick
+   134 0000009B B400                    	mov ah, 0
+   135 0000009D CD1A                    	int 0x1a
+   136                                  
+   137 0000009F 89D0                    	mov ax, dx
+   138 000000A1 2B06[DE01]              	sub ax, [last_tick]
+   139                                  
+   140 000000A5 3B06[E001]              	cmp ax, [tick_interval]
+   141 000000A9 72ED                    	jb game_loop; 无符号小于
+   142                                  
+   143 000000AB 8916[DE01]              	mov [last_tick], dx
+   144                                  
+   145 000000AF E8A500                  	call move_snake
+   146 000000B2 EBE4                    	jmp game_loop
+   147                                  
+   148                                  
+   149                                  check_keyboard:
+   150                                  	; 有没有按键？
+   151 000000B4 B401                        mov ah, 0x01
+   152 000000B6 CD16                        int 0x16
+   153 000000B8 7450                    	jz .done	;没有按键就返回
+   154                                  
+   155                                  	;读到按键就记录,AL = ASCII 码,AH = 键盘扫描码
+   156 000000BA B400                        mov ah, 0x00
+   157 000000BC CD16                    	int 0x16
+   158                                  
+   159                                      ; 检测之后，ah为扫描码，al为ascii码
+   160                                      
+   161 000000BE 80FC48                      cmp ah, 0x48       ; ↑
+   162 000000C1 7411                        je .up
+   163                                  
+   164 000000C3 80FC50                      cmp ah, 0x50       ; ↓
+   165 000000C6 741A                        je .down
+   166                                  
+   167 000000C8 80FC4B                      cmp ah, 0x4B       ; ←
+   168 000000CB 7423                        je .left
+   169                                  
+   170 000000CD 80FC4D                      cmp ah, 0x4D       ; →
+   171 000000D0 742C                        je .right
+   172                                  
+   173 000000D2 EB36                        jmp .done
+   174                                      
+   175                                  ; .up里面的.是一个局部标签，归属于离他最近的非局部标签，比如这里的.up全称就是check_keyboard.up
+   176                                  .up:
+   177 000000D4 803E[E201]02            	cmp byte [direction], DIR_DOWN
+   178 000000D9 742F                    	je .done
+   179 000000DB C606[E201]00            	mov byte [direction], DIR_UP
+   180 000000E0 EB28                    	jmp .done
+   181                                  .down:
+   182 000000E2 803E[E201]00            	cmp byte [direction], DIR_UP
+   183 000000E7 7421                    	je .done
+   184 000000E9 C606[E201]02                mov byte [direction], DIR_DOWN
+   185 000000EE EB1A                        jmp .done
+   186                                  .left:
+   187 000000F0 803E[E201]01            	cmp byte [direction], DIR_RIGHT
+   188 000000F5 7413                    	je .done
+   189 000000F7 C606[E201]03                mov byte [direction], DIR_LEFT
+   190 000000FC EB0C                        jmp .done
+   191                                  .right:
+   192 000000FE 803E[E201]03            	cmp byte [direction], DIR_LEFT
+   193 00000103 7405                    	je .done
+   194 00000105 C606[E201]01                mov byte [direction], DIR_RIGHT
+   195                                  
+   196                                  .done:
+   197 0000010A C3                          ret
+   198                                  
+   199                                  ; 检测蛇头
+   200                                  check_next_head:
+   201                                  	;先检测当前移动方向，如果操作数是内存则需要明确大小，不过另一边是寄存器的话就不用明确
+   202 0000010B 8A16[E501]              	mov dl, [snake_x]
+   203 0000010F 8A36[B509]              	mov dh, [snake_y]
+   204                                  
+   205 00000113 803E[E201]00            	cmp byte [direction], DIR_UP
+   206 00000118 7417                    	je .up
+   207                                  
+   208 0000011A 803E[E201]02            	cmp byte [direction], DIR_DOWN
+   209 0000011F 7419                    	je .down
+   210                                  
+   211 00000121 803E[E201]03            	cmp byte [direction], DIR_LEFT
+   212 00000126 741B                    	je .left
+   213                                  
+   214 00000128 803E[E201]01            	cmp byte [direction], DIR_RIGHT
+   215 0000012D 741D                    	je .right
+   216                                  	;防止落入.up可以加一个明确的分支
+   217 0000012F EB24                    	jmp .blocked
+   218                                  
+   219                                  .up:
+   220 00000131 80FE00                  	cmp dh, 0
+   221 00000134 741F                        je .blocked
+   222 00000136 FECE                    	dec dh
+   223 00000138 EB19                    	jmp .allowed
+   224                                  
+   225                                  .down:
+   226 0000013A 80FE18                  	cmp dh, 24
+   227 0000013D 7316                        jae .blocked
+   228 0000013F FEC6                    	inc dh
+   229 00000141 EB10                    	jmp .allowed
+   230                                  
+   231                                  .left:
+   232 00000143 80FA00                  	cmp dl, 0
+   233 00000146 740D                        je .blocked
+   234 00000148 FECA                    	dec dl
+   235 0000014A EB07                    	jmp .allowed
+   236                                  
+   237                                  .right:
+   238 0000014C 80FA4F                  	cmp dl, 79
+   239 0000014F 7304                        jae .blocked
+   240 00000151 FEC2                    	inc dl
+   241                                  
+   242                                  .allowed:
+   243 00000153 F8                      	clc		; 清除进位标志，CF = 0，允许移动
+   244 00000154 C3                      	ret
+   245                                  
+   246                                  .blocked:
+   247 00000155 F9                      	stc
+   248 00000156 C3                      	ret
+   249                                  
+   250                                  
+   251                                  ; 移动蛇的位置
+   252                                  ; 先检测蛇头下一步的边界，若有问题直接返回，无恙则清空原旧蛇，接着改变光标位置，最后在新位置生成蛇
+   253                                  move_snake:
+   254 00000157 E8B1FF                  	call check_next_head
+   255 0000015A 727F                    	jc .end
+   256 0000015C 52                      	push dx		;保存蛇头坐标
+   257 0000015D 31F6                    	xor si, si
+   258                                  
+   259                                  .clear:
+   260 0000015F 3B36[E301]              	cmp si, [snake_length]
+   261 00000163 731E                    	jae .clean_si_before_change_xy
+   262                                  	; 设置光标
+   263 00000165 B402                    	mov ah, 0x02
+   264 00000167 B700                    	mov bh, 0
+   265 00000169 8AB4[B509]              	mov dh, [snake_y + si]
+   266 0000016D 8A94[E501]              	mov dl, [snake_x + si]
+   267 00000171 CD10                    	int 0x10
+   268                                  	; 清空光标位置
+   269 00000173 B409                    	mov ah, 0x09
+   270 00000175 B020                    	mov al, ' '
+   271 00000177 B700                    	mov bh, 0
+   272 00000179 B30A                    	mov bl, 0x0A
+   273 0000017B B90100                  	mov cx, 1
+   274 0000017E CD10                    	int 0x10
+   275                                  
+   276 00000180 46                      	inc si
+   277 00000181 EBDC                    	jmp .clear
+   278                                  
+   279                                  .clean_si_before_change_xy:
+   280 00000183 5A                      	pop dx		; 恢复蛇头坐标
+   281 00000184 31F6                    	xor si, si
+   282                                  
+   283                                  .change_xy:
+   284 00000186 3B36[E301]              	cmp si, [snake_length]
+   285 0000018A 7322                    	jae .draw
+   286                                  
+   287                                  	; 把当前坐标先放入next_xy
+   288 0000018C 8A84[E501]              	mov al, [snake_x + si]
+   289 00000190 A2[8511]                	mov [next_x], al
+   290 00000193 8AA4[B509]              	mov ah, [snake_y + si]
+   291 00000197 8826[8611]              	mov [next_y], ah
+   292                                  
+   293                                  	; 把x + 1 = x
+   294 0000019B 8894[E501]              	mov [snake_x + si], dl
+   295 0000019F 88B4[B509]              	mov [snake_y + si], dh
+   296                                  
+   297 000001A3 8A16[8511]              	mov dl, [next_x]
+   298 000001A7 8A36[8611]              	mov dh, [next_y]
+   299 000001AB 46                      	inc si
+   300 000001AC EBD8                    	jmp .change_xy
+   301                                  
+   302                                  .draw:
+   303 000001AE 31F6                    	xor si, si
+   304                                  
+   305                                  .set_cursor:
+   306 000001B0 3B36[E301]              	cmp si, [snake_length]
+   307 000001B4 7325                        jae .end
+   308                                  
+   309 000001B6 B402                    	mov ah, 0x02
+   310 000001B8 B700                    	mov bh, 0
+   311 000001BA 8AB4[B509]              	mov dh, [snake_y + si]
+   312 000001BE 8A94[E501]              	mov dl, [snake_x + si]
+   313                                  
+   314 000001C2 CD10                    	int 0x10
+   315                                  
+   316 000001C4 B02A                    	mov al, '*'
+   317 000001C6 83FE00                  	cmp si, 0
+   318 000001C9 7502                    	jne .print
+   319 000001CB B04F                    	mov al, 'O'
+   320                                  	
+   321                                  .print:
+   322 000001CD B409                    	mov ah, 0x09
+   323 000001CF B700                    	mov bh, 0
+   324 000001D1 B30A                    	mov bl, 0x0A
+   325 000001D3 B90100                  	mov cx, 1
+   326 000001D6 CD10                    	int 0x10
+   327                                  
+   328 000001D8 46                      	inc si
+   329 000001D9 EBD5                    	jmp .set_cursor
+   330                                  
+   331                                  .end:
+   332 000001DB C3                      	ret
+   333                                  
+   334                                  hang:
+   335 000001DC EBFE                        jmp hang           ; 停留在这里，避免执行下面的数据
+   336                                      
+   337                                  ; 数据放代码之后
+   338 000001DE 0000                    last_tick dw 0
+   339 000001E0 0600                    tick_interval dw 6
+   340 000001E2 01                      direction db DIR_RIGHT	;蛇的方向
+   341 000001E3 0A00                    snake_length dw 10		;蛇当前长度
+   342                                  snake_x:				;蛇身x坐标
+   343 000001E5 00<rep 7D0h>            	times SNAKE_MAX_LENGTH db 0
+   344                                  
+   345                                  snake_y:				;蛇身y坐标
+   346 000009B5 00<rep 7D0h>            	times SNAKE_MAX_LENGTH db 0
+   347 00001185 00                      next_x db 0
+   348 00001186 00                      next_y db 0
+   349 00001187 1E                      init_snake_x db 30
+   350 00001188 05                      init_snake_y db 5
+   351                                  
+   352                                  
+   353                                  ; 13,10分布代表光标回到当前行的开头以及光标移动到下一行
+   354                                  menu_message:
+   355 00001189 536E616B652047616D-     	db "Snake Game", 13, 10
+   355 00001192 650D0A             
+   356 00001195 507265737320616E79-     	db "Press any button to enter...", 0
+   356 0000119E 20627574746F6E2074-
+   356 000011A7 6F20656E7465722E2E-
+   356 000011B0 2E00               
+   357                                  
+   358 000011B2 00<rep 44Eh>            times 5632 - ($ - $$) db 0
